@@ -1,0 +1,11 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    queries: "internal/storage/queries"
+    schema: "internal/storage/migrations"
+    gen:
+      go:
+        package: "gen"
+        out: "internal/storage/gen"
+        sql_package: "pgx/v5"
+        emit_pointers_for_null_types: true

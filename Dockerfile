@@ -1,5 +1,5 @@
 # Этап 1: сборка статического бинарника
-FROM golang:1.23-alpine AS build
+FROM golang:alpine AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

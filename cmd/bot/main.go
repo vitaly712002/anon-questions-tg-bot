@@ -158,7 +158,7 @@ func run(log *slog.Logger) error {
 	case config.ModePolling:
 		// Снять возможный webhook, иначе getUpdates вернёт конфликт.
 		if _, err := b.DeleteWebhook(ctx, &bot.DeleteWebhookParams{}); err != nil {
-			return fmt.Errorf("deleteWebhook: %w", err)
+			log.Warn("deleteWebhook предупреждение (можно игнорировать)", "err", err)
 		}
 		go func() {
 			defer close(botDone)

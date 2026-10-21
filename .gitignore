@@ -1,0 +1,10 @@
+# Секреты — только в env, никогда в git
+.env
+deploy/.env
+
+# Бинарники и артефакты сборки
+/bin/
+/bot
+/bot.exe
+*.test
+coverage.out

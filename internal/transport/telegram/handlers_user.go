@@ -1,0 +1,232 @@
+package telegram
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/go-telegram/bot/models"
+
+	"github.com/vitaly/secure-ask-tg-bot/internal/service"
+	"github.com/vitaly/secure-ask-tg-bot/internal/storage"
+	"github.com/vitaly/secure-ask-tg-bot/internal/storage/gen"
+)
+
+// onMessage маршрутизирует входящее личное сообщение: команда или
+// продолжение диалога по состоянию из dialog_states.
+func (r *Router) onMessage(ctx context.Context, msg *models.Message) error {
+	if strings.HasPrefix(msg.Text, "/") {
+		return r.onCommand(ctx, msg)
+	}
+	st, err := r.svc.Store.GetDialogState(ctx, msg.From.ID)
+	if storage.IsNotFound(err) {
+		return r.reply(ctx, msg.Chat.ID, userMessage(service.ErrNoDialog), nil)
+	}
+	if err != nil {
+		return err
+	}
+	switch st.State {
+	case service.StateAsking:
+		return r.onAskMessage(ctx, msg)
+	case service.StateReplying:
+		return r.onReplyMessage(ctx, msg)
+	case service.StateSettingAlias:
+		return r.onAliasMessage(ctx, msg)
+	case service.StateAdminFind, service.StateAdminRoleFind:
+		return r.onAdminFindMessage(ctx, msg, st.State)
+	default:
+		return r.reply(ctx, msg.Chat.ID, userMessage(service.ErrNoDialog), nil)
+	}
+}
+
+// onCommand обрабатывает команды. Формат: /cmd [аргумент].
+func (r *Router) onCommand(ctx context.Context, msg *models.Message) error {
+	cmd, arg, _ := strings.Cut(strings.TrimSpace(msg.Text), " ")
+	cmd = strings.ToLower(strings.TrimSuffix(cmd, "@"+r.botUsername()))
+	arg = strings.TrimSpace(arg)
+
+	switch cmd {
+	case "/start":
+		if arg != "" {
+			return r.cmdStartAsking(ctx, msg, arg)
+		}
+		return r.cmdStart(ctx, msg)
+	case "/link":
+		return r.cmdLink(ctx, msg)
+	case "/alias":
+		return r.cmdAlias(ctx, msg, arg)
+	case "/pause":
+		return r.cmdSetAccepting(ctx, msg, false)
+	case "/resume":
+		return r.cmdSetAccepting(ctx, msg, true)
+	case "/stop":
+		return r.cmdStop(ctx, msg)
+	case "/stats":
+		return r.cmdStats(ctx, msg)
+	case "/privacy":
+		return r.reply(ctx, msg.Chat.ID, privacyText, nil)
+	case "/admin":
+		return r.cmdAdmin(ctx, msg)
+	default:
+		return r.reply(ctx, msg.Chat.ID, "Неизвестная команда. Доступные команды — в меню.", nil)
+	}
+}
+
+// cmdStart — регистрация и выдача персональной ссылки.
+func (r *Router) cmdStart(ctx context.Context, msg *models.Message) error {
+	user, link, err := r.svc.Users.Register(ctx, msg.From.ID, usernamePtr(msg.From), displayName(msg.From))
+	if err != nil {
+		return err
+	}
+	// Пользователь вернулся по /start — старое состояние диалога больше не актуально.
+	if err := r.svc.Store.ClearDialogState(ctx, msg.From.ID); err != nil {
+		return err
+	}
+	text := fmt.Sprintf(
+		"Привет, %s! 👋\n\nЭто бот анонимных вопросов. Вот ваша персональная ссылка:\n\n%s\n\n"+
+			"Опубликуйте её в профиле или сторис — и получайте анонимные вопросы "+
+			"в любом формате: текст, фото, видео, голосовые, кружочки.\n\n"+
+			"Команды: /link — ссылка, /alias — красивый адрес, /pause — пауза, /stats — статистика, /privacy — о приватности.",
+		user.DisplayName, r.svc.Links.URL(link),
+	)
+	return r.reply(ctx, msg.Chat.ID, text, nil)
+}
+
+// cmdStartAsking — гость открыл чью-то ссылку: /start q_<токен> или /start <алиас>.
+func (r *Router) cmdStartAsking(ctx context.Context, msg *models.Message, arg string) error {
+	name, err := r.svc.Questions.StartAsking(ctx, msg.From.ID, arg, r.svc.Links)
+	if err != nil {
+		return r.reply(ctx, msg.Chat.ID, userMessage(err), nil)
+	}
+	text := fmt.Sprintf(
+		"✉️ Задайте анонимный вопрос для %s.\n\n"+
+			"Отправьте что угодно: текст, фото, видео, голосовое, кружочек… "+
+			"Получатель не узнает, кто вы.",
+		name,
+	)
+	return r.reply(ctx, msg.Chat.ID, text, nil)
+}
+
+// cmdLink показывает персональную ссылку с текстом-приглашением.
+func (r *Router) cmdLink(ctx context.Context, msg *models.Message) error {
+	_, link, err := r.svc.Users.Register(ctx, msg.From.ID, usernamePtr(msg.From), displayName(msg.From))
+	if err != nil {
+		return err
+	}
+	url := r.svc.Links.URL(link)
+	text := fmt.Sprintf(
+		"🔗 Ваша ссылка:\n%s\n\nТекст для репоста:\n\n«Задай мне анонимный вопрос — я не узнаю, кто ты 👀\n%s»",
+		url, url,
+	)
+	return r.reply(ctx, msg.Chat.ID, text, nil)
+}
+
+// cmdAlias — задать алиас: /alias vasya сразу, /alias без аргумента — диалог.
+func (r *Router) cmdAlias(ctx context.Context, msg *models.Message, arg string) error {
+	user, _, err := r.svc.Users.Register(ctx, msg.From.ID, usernamePtr(msg.From), displayName(msg.From))
+	if err != nil {
+		return err
+	}
+	if arg == "" {
+		if err := r.setState(ctx, msg.From.ID, service.StateSettingAlias, service.DialogPayload{}); err != nil {
+			return err
+		}
+		return r.reply(ctx, msg.Chat.ID,
+			"Пришлите желаемый алиас: 3–32 символа, строчные латинские буквы, цифры, подчёркивание.\n"+
+				"Ссылка станет вида t.me/"+r.botUsername()+"?start=<алиас>", nil)
+	}
+	return r.applyAlias(ctx, msg.Chat.ID, user.ID, arg)
+}
+
+// onAliasMessage — пользователь прислал алиас в состоянии setting_alias.
+func (r *Router) onAliasMessage(ctx context.Context, msg *models.Message) error {
+	user, err := r.svc.Users.Get(ctx, msg.From.ID)
+	if err != nil {
+		return err
+	}
+	if msg.Text == "" {
+		return r.reply(ctx, msg.Chat.ID, "Алиас должен быть текстом.", nil)
+	}
+	if err := r.applyAlias(ctx, msg.Chat.ID, user.ID, msg.Text); err != nil {
+		return err
+	}
+	return r.svc.Store.ClearDialogState(ctx, msg.From.ID)
+}
+
+// applyAlias устанавливает алиас и отвечает пользователю.
+func (r *Router) applyAlias(ctx context.Context, chatID, userID int64, raw string) error {
+	alias, err := r.svc.Links.SetAlias(ctx, userID, raw)
+	if err != nil {
+		return r.reply(ctx, chatID, userMessage(err), nil)
+	}
+	return r.reply(ctx, chatID,
+		fmt.Sprintf("✅ Готово! Новая ссылка:\nhttps://t.me/%s?start=%s", r.botUsername(), alias), nil)
+}
+
+// cmdSetAccepting — /pause и /resume.
+func (r *Router) cmdSetAccepting(ctx context.Context, msg *models.Message, accepting bool) error {
+	user, err := r.svc.Users.Get(ctx, msg.From.ID)
+	if err != nil {
+		return r.reply(ctx, msg.Chat.ID, "Сначала зарегистрируйтесь: /start", nil)
+	}
+	if err := r.svc.Users.SetAccepting(ctx, user.ID, accepting); err != nil {
+		return err
+	}
+	if accepting {
+		return r.reply(ctx, msg.Chat.ID, "▶️ Приём вопросов возобновлён.", nil)
+	}
+	return r.reply(ctx, msg.Chat.ID, "⏸ Приём вопросов приостановлен. Вернуть: /resume", nil)
+}
+
+// cmdStop — полная отписка, с подтверждением (разрушительное действие).
+func (r *Router) cmdStop(ctx context.Context, msg *models.Message) error {
+	if _, err := r.svc.Users.Get(ctx, msg.From.ID); err != nil {
+		return r.reply(ctx, msg.Chat.ID, "Вы и не подписаны. Начать: /start", nil)
+	}
+	kb := service.Keyboard{service.Row(
+		service.Button{Text: "Да, отключить", Data: "stop:yes"},
+		service.Button{Text: "Отмена", Data: "cancel"},
+	)}
+	return r.reply(ctx, msg.Chat.ID,
+		"Точно отключить приём вопросов и деактивировать ссылку?\nВернуть всё можно командой /resume.", kb)
+}
+
+// cmdStats — личная статистика.
+func (r *Router) cmdStats(ctx context.Context, msg *models.Message) error {
+	user, err := r.svc.Users.Get(ctx, msg.From.ID)
+	if err != nil {
+		return r.reply(ctx, msg.Chat.ID, "Сначала зарегистрируйтесь: /start", nil)
+	}
+	st, err := r.svc.Users.Stats(ctx, user.ID)
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf(
+		"📊 Ваша статистика:\n├ Переходов по ссылке: %d\n├ Вопросов получено: %d\n├ Отвечено: %d\n└ Заблокировано отправителей: %d",
+		st.Clicks, st.Received, st.Answered, st.Blocked,
+	)
+	return r.reply(ctx, msg.Chat.ID, text, nil)
+}
+
+// privacyText — честное описание модели анонимности (docs/05).
+const privacyText = "🔒 О приватности\n\n" +
+	"Личность отправителя вопроса недоступна получателю: бот не пересылает, " +
+	"а копирует сообщения — без имени и метки «Forwarded from». В базе данных " +
+	"отправитель хранится в зашифрованном виде.\n\n" +
+	"Однако абсолютной анонимности не существует: модерация сервиса имеет " +
+	"техническую возможность установить отправителя при нарушении правил " +
+	"(спам, угрозы, травля). Каждое такое действие фиксируется в журнале.\n\n" +
+	"Тексты и медиа ваших вопросов бот не хранит вовсе."
+
+// setState — сокращение для записи состояния диалога.
+func (r *Router) setState(ctx context.Context, tgID int64, state string, p service.DialogPayload) error {
+	return r.svc.Store.SetDialogState(ctx, gen.SetDialogStateParams{
+		TgID: tgID, State: state, Payload: service.MarshalPayload(p),
+	})
+}
+
+// reply отправляет ответ в чат (обёртка над клиентом с клавиатурой).
+func (r *Router) reply(ctx context.Context, chatID int64, text string, kb service.Keyboard) error {
+	_, err := r.tg.SendMessage(ctx, chatID, text, kb)
+	return err
+}

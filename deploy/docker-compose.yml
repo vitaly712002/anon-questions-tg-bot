@@ -1,0 +1,43 @@
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    networks: [web]
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+  bot:
+    build: ..
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      db: { condition: service_healthy }
+    networks: [web, internal]
+    # порт наружу НЕ публикуем — к боту ходит только Caddy по внутренней сети
+    logging: *logging
+
+  db:
+    image: postgres:16-alpine
+    container_name: secure-ask-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: secureask
+      POSTGRES_USER: secureask
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks: [internal]
+    # наружу не публикуем вообще
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U secureask"]
+      interval: 5s
+      retries: 10
+    logging: *logging
+
+volumes: { caddy_data: {}, pg_data: {} }
+networks: { web: {}, internal: {} }

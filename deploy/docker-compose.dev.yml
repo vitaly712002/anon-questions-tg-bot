@@ -1,0 +1,15 @@
+# Локальная разработка: только Postgres, наружу на 5432.
+# Запуск: docker compose -f deploy/docker-compose.dev.yml up -d
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: secureask
+      POSTGRES_USER: secureask
+      POSTGRES_PASSWORD: secureask
+    ports: ["5432:5432"]
+    volumes:
+      - pg_dev_data:/var/lib/postgresql/data
+
+volumes: { pg_dev_data: {} }

@@ -12,12 +12,20 @@ import (
 
 // onAskMessage — гость в состоянии asking прислал вопрос (любого типа).
 func (r *Router) onAskMessage(ctx context.Context, msg *models.Message) error {
+	senderName := displayName(msg.From)
+	if msg.From.Username != "" {
+		senderName = "@" + msg.From.Username + " (" + senderName + ")"
+	}
+
 	err := r.svc.Questions.Submit(ctx, service.SubmitInput{
-		SenderTgID:  msg.From.ID,
-		SrcChatID:   msg.Chat.ID,
-		SrcMsgID:    msg.ID,
-		ContentType: contentType(msg),
-		Protected:   msg.HasProtectedContent,
+		SenderTgID:     msg.From.ID,
+		SenderUsername: senderName,
+		Text:           extractText(msg),
+		FileID:         extractFileID(msg),
+		SrcChatID:      msg.Chat.ID,
+		SrcMsgID:       msg.ID,
+		ContentType:    contentType(msg),
+		Protected:      msg.HasProtectedContent,
 	})
 	if err != nil && !errors.Is(err, service.ErrSilentDrop) {
 		return r.reply(ctx, msg.Chat.ID, userMessage(err), nil)
@@ -27,6 +35,37 @@ func (r *Router) onAskMessage(ctx context.Context, msg *models.Message) error {
 		"Можете отправить ещё одно сообщение — или получить собственную ссылку " +
 		"для анонимных вопросов: /link"
 	return r.reply(ctx, msg.Chat.ID, text, nil)
+}
+
+func extractText(m *models.Message) string {
+	if m.Text != "" {
+		return m.Text
+	}
+	if m.Caption != "" {
+		return m.Caption
+	}
+	return ""
+}
+
+func extractFileID(m *models.Message) string {
+	switch {
+	case m.Voice != nil:
+		return m.Voice.FileID
+	case m.VideoNote != nil:
+		return m.VideoNote.FileID
+	case len(m.Photo) > 0:
+		return m.Photo[len(m.Photo)-1].FileID
+	case m.Video != nil:
+		return m.Video.FileID
+	case m.Audio != nil:
+		return m.Audio.FileID
+	case m.Document != nil:
+		return m.Document.FileID
+	case m.Animation != nil:
+		return m.Animation.FileID
+	default:
+		return ""
+	}
 }
 
 // onReplyMessage — получатель в состоянии replying прислал ответ.

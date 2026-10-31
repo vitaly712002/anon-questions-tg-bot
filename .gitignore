@@ -1,10 +1,38 @@
-# Секреты — только в env, никогда в git
+# === Секреты (никогда в git) ===
 .env
+*.env
 deploy/.env
+!deploy/.env.example
 
-# Бинарники и артефакты сборки
+# === Go: сборка и артефакты ===
 /bin/
 /bot
 /bot.exe
+/data/
+*.exe
+*.out
 *.test
+*.log
 coverage.out
+
+# === Frontend (Node / Vite) ===
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+*.local
+
+# === Документация (хранится только локально) ===
+docs/
+
+# === Редакторы и ОС ===
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+*.iml
+
+# === Прочее ===
+tmp/
+*.tmp

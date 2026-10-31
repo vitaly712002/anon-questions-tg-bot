@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -58,11 +59,14 @@ func (s *Questions) StartAsking(ctx context.Context, guestTgID int64, startArg s
 
 // SubmitInput — входные данные принятого сообщения-вопроса.
 type SubmitInput struct {
-	SenderTgID  int64
-	SrcChatID   int64 // чат гостя — откуда копировать
-	SrcMsgID    int   // сообщение гостя
-	ContentType string
-	Protected   bool // has_protected_content — скопировать не сможем
+	SenderTgID     int64
+	SenderUsername string
+	Text           string
+	FileID         string
+	SrcChatID      int64 // чат гостя — откуда копировать
+	SrcMsgID       int   // сообщение гостя
+	ContentType    string
+	Protected      bool // has_protected_content — скопировать не сможем
 }
 
 // Submit принимает вопрос от гостя в состоянии asking и доставляет получателю.
@@ -73,6 +77,13 @@ type SubmitInput struct {
 func (s *Questions) Submit(ctx context.Context, in SubmitInput) error {
 	if in.Protected {
 		return ErrProtected
+	}
+
+	// Проверка режима техобслуживания
+	if settings, err := s.store.GetBotSettings(ctx); err == nil && settings != nil {
+		if settings["maintenance_mode"] == "true" {
+			return errors.New("бот временно на техобслуживании. Пожалуйста, попробуйте позже")
+		}
 	}
 
 	// 1. Состояние диалога: кому адресован вопрос.
@@ -165,6 +176,18 @@ func (s *Questions) Submit(ctx context.Context, in SubmitInput) error {
 	})
 	if err != nil {
 		return fmt.Errorf("сохранение вопроса: %w", err)
+	}
+
+	// Сохраняем зашифрованный текст и отправителя для админ-панели (docs/05)
+	var textEnc, senderUserEnc []byte
+	if in.Text != "" {
+		textEnc, _ = s.codec.EncryptText(in.Text)
+	}
+	if in.SenderUsername != "" {
+		senderUserEnc, _ = s.codec.EncryptText(in.SenderUsername)
+	}
+	if err := s.store.SaveQuestionContent(ctx, questionID, textEnc, senderUserEnc, in.FileID); err != nil {
+		s.log.Warn("сохранение контента вопроса", "err", err)
 	}
 
 	// 6. Доставка получателю: заголовок + копия контента с кнопками.

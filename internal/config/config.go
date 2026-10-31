@@ -9,43 +9,42 @@ import (
 	"github.com/caarlos0/env/v11"
 )
 
-// Mode — режим получения обновлений от Telegram.
 type Mode string
 
 const (
-	ModePolling Mode = "polling" // локальная разработка
-	ModeWebhook Mode = "webhook" // прод
+	ModePolling Mode = "polling"
+	ModeWebhook Mode = "webhook"
 )
 
-// Config — все настройки приложения. Источник — только env (12-factor).
 type Config struct {
 	Mode          Mode   `env:"MODE" envDefault:"polling"`
 	BotToken      string `env:"BOT_TOKEN,required"`
-	WebhookURL    string `env:"WEBHOOK_URL"`    // https://bot.example.com/webhook/<суффикс>
-	WebhookSecret string `env:"WEBHOOK_SECRET"` // проверка X-Telegram-Bot-Api-Secret-Token
+	WebhookURL    string `env:"WEBHOOK_URL"`
+	WebhookSecret string `env:"WEBHOOK_SECRET"`
 	ListenAddr    string `env:"LISTEN_ADDR" envDefault:":8080"`
 
-	OwnerTgID int64  `env:"OWNER_TG_ID,required"` // владелец бота — sysadmin автоматически
+	OwnerTgID int64  `env:"OWNER_TG_ID,required"`
 	DBURL     string `env:"DB_URL,required"`
 
-	EncryptionKeyB64 string `env:"ENCRYPTION_KEY,required"` // 32 байта base64 — AES-256-GCM
-	HMACKeyB64       string `env:"HMAC_KEY,required"`       // 32 байта base64 — HMAC-SHA256
+	AdminUsername string `env:"ADMIN_USERNAME" envDefault:"admin"`
+	AdminPassword string `env:"ADMIN_PASSWORD,required"`
 
-	// Антифлуд: burst в памяти + суточный лимит по sender_hash.
+	WebDir string `env:"WEB_DIR" envDefault:""`
+
+	EncryptionKeyB64 string `env:"ENCRYPTION_KEY,required"`
+	HMACKeyB64       string `env:"HMAC_KEY,required"`
+
 	RateBurstPerHour int `env:"RATE_BURST_PER_HOUR" envDefault:"20"`
 	RateDailyLimit   int `env:"RATE_DAILY_LIMIT" envDefault:"100"`
 
-	// Воркер-пул: 0 = GOMAXPROCS*4.
 	Workers int `env:"WORKERS" envDefault:"0"`
 
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" envDefault:"15s"`
 
-	// Расшифрованные ключи (заполняются в Load, в env их нет).
 	EncryptionKey []byte `env:"-"`
 	HMACKey       []byte `env:"-"`
 }
 
-// Load читает конфиг из окружения и валидирует его.
 func Load() (*Config, error) {
 	cfg := &Config{}
 	if err := env.Parse(cfg); err != nil {
@@ -76,7 +75,6 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
-// decodeKey декодирует base64-ключ и проверяет длину 32 байта.
 func decodeKey(b64, name string) ([]byte, error) {
 	key, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {

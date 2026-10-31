@@ -1,25 +1,28 @@
-services:
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    ports: ["80:80", "443:443"]
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-    networks: [web]
-    logging: &logging
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+# Прод-стек secure-ask. Самодостаточен: бот (с веб-панелью) + база.
+# Caddy сюда НЕ входит — им занимается отдельный проект edge.
+# Веб-панель собрана в образ и отдаётся самим ботом на :8080 (как в chatkeeper).
+#
+# Требуется общая сеть edge (один раз на сервер): docker network create web
+#
+# Запуск (имя проекта deploy сохраняем, чтобы не потерять том с БД):
+#   docker compose -p deploy --env-file .env up -d --build
 
+services:
   bot:
     build: ..
     restart: unless-stopped
     env_file: .env
     depends_on:
       db: { condition: service_healthy }
-    networks: [web, internal]
-    # порт наружу НЕ публикуем — к боту ходит только Caddy по внутренней сети
-    logging: *logging
+    networks:
+      web:
+        # По этому имени edge (Caddy) обращается к боту: webhook + /api + панель.
+        aliases: [secure-ask-bot]
+      internal: {}
+    # порт наружу НЕ публикуем — к боту ходит только edge по сети web
+    logging: &logging
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
 
   db:
     image: postgres:16-alpine
@@ -39,5 +42,10 @@ services:
       retries: 10
     logging: *logging
 
-volumes: { caddy_data: {}, pg_data: {} }
-networks: { web: {}, internal: {} }
+networks:
+  # Общая сеть edge. Создаётся вручную: docker network create web
+  web:
+    external: true
+  internal: {}
+
+volumes: { pg_data: {} }

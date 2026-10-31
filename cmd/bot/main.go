@@ -1,6 +1,4 @@
 // Команда bot — Telegram-бот анонимных вопросов «Secure Ask».
-// Сборка зависимостей, запуск в режиме webhook (прод) или polling (разработка),
-// graceful shutdown: ни один принятый вопрос не теряется при деплое.
 package main
 
 import (
@@ -24,6 +22,7 @@ import (
 	"github.com/vitaly/secure-ask-tg-bot/internal/service"
 	"github.com/vitaly/secure-ask-tg-bot/internal/storage"
 	"github.com/vitaly/secure-ask-tg-bot/internal/storage/gen"
+	"github.com/vitaly/secure-ask-tg-bot/internal/transport/api"
 	tgtransport "github.com/vitaly/secure-ask-tg-bot/internal/transport/telegram"
 )
 
@@ -46,7 +45,6 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("конфиг: %w", err)
 	}
 
-	// --- хранилище и криптография ---
 	st, err := storage.New(ctx, cfg.DBURL)
 	if err != nil {
 		return fmt.Errorf("хранилище: %w", err)
@@ -59,13 +57,14 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("крипто: %w", err)
 	}
 
-	// Владелец получает sysadmin идемпотентно (если уже зарегистрирован;
-	// иначе — при первом /start в service.Users.Register).
 	if err := st.EnsureOwnerSysadmin(ctx, cfg.OwnerTgID); err != nil {
 		return fmt.Errorf("owner sysadmin: %w", err)
 	}
 
-	// --- Telegram-бот ---
+	if err := st.EnsureDefaultAdmin(ctx, cfg.AdminUsername, cfg.AdminPassword); err != nil {
+		log.Warn("ensure default admin", "err", err)
+	}
+
 	metrics := &tgtransport.Metrics{}
 	var router *tgtransport.Router // заполняется ниже; хендлеру нужен до создания
 
@@ -90,7 +89,6 @@ func run(log *slog.Logger) error {
 	}
 	log.Info("бот авторизован", "username", me.Username)
 
-	// --- сервисный слой ---
 	store := storeAdapter{st}
 	tgClient := tgtransport.NewClient(b)
 	burst := ratelimit.New(cfg.RateBurstPerHour)
@@ -112,7 +110,6 @@ func run(log *slog.Logger) error {
 
 	setupCommands(ctx, b, cfg.OwnerTgID, log)
 
-	// --- HTTP: /healthz, /metrics и (в webhook-режиме) endpoint Telegram ---
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := st.Pool.Ping(r.Context()); err != nil {
@@ -128,14 +125,20 @@ func run(log *slog.Logger) error {
 		fmt.Fprintf(w, "# TYPE bot_queue_len gauge\nbot_queue_len %d\n", metrics.QueueLen.Load())
 	})
 
-	// --- воркеры ---
+	apiServer := api.NewServer(st, codec, b, cfg.BotToken, cfg.HMACKey, log)
+	apiServer.RegisterRoutes(mux)
+
+	if cfg.WebDir != "" {
+		mux.HandleFunc("/", api.StaticHandler(cfg.WebDir))
+		log.Info("раздача веб-панели включена", "dir", cfg.WebDir)
+	}
+
 	routerDone := make(chan struct{})
 	go func() {
 		defer close(routerDone)
 		router.Run(ctx)
 	}()
 
-	// --- режим получения обновлений ---
 	botDone := make(chan struct{})
 	switch cfg.Mode {
 	case config.ModeWebhook:
@@ -152,7 +155,7 @@ func run(log *slog.Logger) error {
 		mux.HandleFunc(wu.Path, b.WebhookHandler())
 		go func() {
 			defer close(botDone)
-			b.StartWebhook(ctx) // разбирает очередь updates, полученных webhook-хендлером
+			b.StartWebhook(ctx)
 		}()
 		log.Info("режим webhook", "path", wu.Path)
 	case config.ModePolling:
@@ -180,7 +183,6 @@ func run(log *slog.Logger) error {
 	}()
 	log.Info("HTTP-сервер запущен", "addr", cfg.ListenAddr)
 
-	// --- ожидание сигнала и graceful shutdown ---
 	select {
 	case <-ctx.Done():
 		log.Info("получен сигнал остановки")
@@ -192,13 +194,12 @@ func run(log *slog.Logger) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
-	// 1. Перестаём принимать новые обновления.
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Warn("остановка HTTP", "err", err)
 	}
-	<-botDone // библиотека остановилась (ctx уже отменён сигналом)
+	<-botDone
 
-	// 2. Дообрабатываем хвост очередей — принятые вопросы не теряются.
+	// Дообрабатываем хвост очередей — принятые вопросы не теряются.
 	router.Stop()
 	select {
 	case <-routerDone:
@@ -209,8 +210,6 @@ func run(log *slog.Logger) error {
 	return nil
 }
 
-// setupCommands регистрирует меню команд: базовый набор всем,
-// владельцу дополнительно /admin (у остальных админов — при выдаче роли).
 func setupCommands(ctx context.Context, b *bot.Bot, ownerTgID int64, log *slog.Logger) {
 	if _, err := b.SetMyCommands(ctx, &bot.SetMyCommandsParams{
 		Commands: tgtransport.UserCommands(),
@@ -224,7 +223,6 @@ func setupCommands(ctx context.Context, b *bot.Bot, ownerTgID int64, log *slog.L
 		Commands: adminCmds,
 		Scope:    &models.BotCommandScopeChat{ChatID: ownerTgID},
 	}); err != nil {
-		// Ок, если владелец ещё ни разу не открывал бота.
 		log.Warn("setMyCommands (owner)", "err", err)
 	}
 }

@@ -1,7 +1,0 @@
-# Замените bot.example.com на свой домен. TLS-сертификат Let's Encrypt
-# выпускается и продлевается автоматически.
-bot.example.com {
-	reverse_proxy /webhook/* bot:8080
-	reverse_proxy /healthz bot:8080
-	respond 404
-}

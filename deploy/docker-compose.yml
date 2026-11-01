@@ -1,11 +1,13 @@
+name: secure-ask
+
 # Прод-стек secure-ask. Самодостаточен: бот (с веб-панелью) + база.
 # Caddy сюда НЕ входит — им занимается отдельный проект edge.
 # Веб-панель собрана в образ и отдаётся самим ботом на :8080 (как в chatkeeper).
 #
 # Требуется общая сеть edge (один раз на сервер): docker network create web
 #
-# Запуск (имя проекта deploy сохраняем, чтобы не потерять том с БД):
-#   docker compose -p deploy --env-file .env up -d --build
+# Запуск:
+#   docker compose up -d --build
 
 services:
   bot:
@@ -48,4 +50,6 @@ networks:
     external: true
   internal: {}
 
-volumes: { pg_data: {} }
+volumes:
+  pg_data:
+    name: deploy_pg_data

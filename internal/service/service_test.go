@@ -43,6 +43,14 @@ func newFakeStore() *fakeStore {
 
 func (f *fakeStore) WithTx(ctx context.Context, fn func(q Querier) error) error { return fn(f) }
 
+func (f *fakeStore) GetBotSettings(_ context.Context) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (f *fakeStore) SaveQuestionContent(_ context.Context, _ int64, _, _ []byte, _ string) error {
+	return nil
+}
+
 func (f *fakeStore) GetDialogState(_ context.Context, tgID int64) (gen.DialogState, error) {
 	st, ok := f.states[tgID]
 	if !ok {

@@ -173,14 +173,14 @@ func (s *Storage) ListUsersAdmin(ctx context.Context) ([]UserListItem, error) {
 	return users, rows.Err()
 }
 
-// SetUserRole меняет роль пользователя.
-func (s *Storage) SetUserRole(ctx context.Context, userID int64, role string) error {
+// AdminSetUserRole меняет роль пользователя.
+func (s *Storage) AdminSetUserRole(ctx context.Context, userID int64, role string) error {
 	_, err := s.Pool.Exec(ctx, "UPDATE users SET role = $2::user_role WHERE id = $1", userID, role)
 	return err
 }
 
-// SetUserBanned банит или разбанивает пользователя.
-func (s *Storage) SetUserBanned(ctx context.Context, userID int64, banned bool) error {
+// AdminSetUserBanned банит или разбанивает пользователя.
+func (s *Storage) AdminSetUserBanned(ctx context.Context, userID int64, banned bool) error {
 	_, err := s.Pool.Exec(ctx, "UPDATE users SET banned = $2 WHERE id = $1", userID, banned)
 	return err
 }

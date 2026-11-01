@@ -301,7 +301,7 @@ func (s *Server) handleUserAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.SetUserRole(r.Context(), userID, req.Role); err != nil {
+		if err := s.store.AdminSetUserRole(r.Context(), userID, req.Role); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -316,7 +316,7 @@ func (s *Server) handleUserAction(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		if err := s.store.SetUserBanned(r.Context(), userID, req.Banned); err != nil {
+		if err := s.store.AdminSetUserBanned(r.Context(), userID, req.Banned); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

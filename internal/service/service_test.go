@@ -51,6 +51,10 @@ func (f *fakeStore) SaveQuestionContent(_ context.Context, _ int64, _, _ []byte,
 	return nil
 }
 
+func (f *fakeStore) SaveQuestionAnswer(_ context.Context, _ int64, _ []byte, _ string) error {
+	return nil
+}
+
 func (f *fakeStore) GetDialogState(_ context.Context, tgID int64) (gen.DialogState, error) {
 	st, ok := f.states[tgID]
 	if !ok {
@@ -464,7 +468,7 @@ func TestAnswer_DeliversToSenderAnonymously(t *testing.T) {
 	if err := svc.StartReplying(context.Background(), recipientTgID, 1); err != nil {
 		t.Fatalf("StartReplying: %v", err)
 	}
-	if err := svc.Answer(context.Background(), recipientTgID, 100); err != nil {
+	if err := svc.Answer(context.Background(), recipientTgID, 100, "спасибо за вопрос", ""); err != nil {
 		t.Fatalf("Answer: %v", err)
 	}
 	if len(tg.sent) != 2 {

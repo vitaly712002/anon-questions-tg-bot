@@ -11,9 +11,10 @@ export default function QuestionsFeed({ questions, loading, onRefresh }) {
     if (search.trim()) {
       const s = search.toLowerCase();
       const textMatch = q.text?.toLowerCase().includes(s);
+      const answerMatch = q.answer_text?.toLowerCase().includes(s);
       const recipientMatch = q.recipient_username?.toLowerCase().includes(s);
       const senderMatch = q.sender_username?.toLowerCase().includes(s);
-      return textMatch || recipientMatch || senderMatch;
+      return textMatch || answerMatch || recipientMatch || senderMatch;
     }
     return true;
   });
@@ -199,6 +200,45 @@ export default function QuestionsFeed({ questions, loading, onRefresh }) {
                     </div>
                   )}
                 </div>
+
+                {/* Содержимое ответа (если вопрос отвечен) */}
+                {q.answered && (
+                  <div className="mt-4 pt-3 border-t border-slate-800/80">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400 mb-2">
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Ответ получателя (@{q.recipient_username || q.recipient_name || 'пользователь'}):</span>
+                      {q.answered_at && (
+                        <span className="text-[11px] font-normal text-slate-500 ml-1">
+                          • {new Date(q.answered_at).toLocaleString('ru-RU', {
+                              day: 'numeric',
+                              month: 'short',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                        </span>
+                      )}
+                    </div>
+
+                    {q.answer_text ? (
+                      <div className="p-3 bg-emerald-950/20 border border-emerald-500/20 rounded-xl text-sm text-emerald-100 whitespace-pre-wrap leading-relaxed shadow-sm">
+                        {q.answer_text}
+                      </div>
+                    ) : q.answer_media_url ? (
+                      <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl">
+                        <span className="text-xs text-slate-400">Медиа-ответ:</span>
+                        <img
+                          src={q.answer_media_url}
+                          alt="Медиа-ответ"
+                          className="mt-2 max-w-xs rounded-lg border border-slate-800"
+                        />
+                      </div>
+                    ) : (
+                      <div className="p-2.5 bg-slate-950/30 border border-slate-800/50 rounded-xl text-xs text-slate-400 italic">
+                        Ответ был отправлен в Telegram (текст не сохранён для старых сообщений).
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

@@ -83,6 +83,7 @@ type Store interface {
 	Querier
 	WithTx(ctx context.Context, fn func(q Querier) error) error
 	SaveQuestionContent(ctx context.Context, questionID int64, textEnc, senderUserEnc []byte, fileID string) error
+	SaveQuestionAnswer(ctx context.Context, questionID int64, answerTextEnc []byte, answerFileID string) error
 	GetBotSettings(ctx context.Context) (map[string]string, error)
 }
 

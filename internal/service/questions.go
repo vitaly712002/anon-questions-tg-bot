@@ -294,7 +294,7 @@ func (s *Questions) StartReplying(ctx context.Context, recipientTgID, questionID
 // Answer доставляет ответ получателя отправителю вопроса.
 // Расшифровка tg_id здесь — техническая (для доставки), личность никому
 // не показывается (docs/09). Отправитель получает кнопку продолжить диалог.
-func (s *Questions) Answer(ctx context.Context, recipientTgID int64, srcMsgID int) error {
+func (s *Questions) Answer(ctx context.Context, recipientTgID int64, srcMsgID int, answerText, answerFileID string) error {
 	st, err := s.store.GetDialogState(ctx, recipientTgID)
 	if storage.IsNotFound(err) || (err == nil && st.State != StateReplying) {
 		return ErrNoDialog
@@ -333,6 +333,15 @@ func (s *Questions) Answer(ctx context.Context, recipientTgID int64, srcMsgID in
 	if err := s.store.MarkQuestionAnswered(ctx, q.ID); err != nil {
 		return err
 	}
+
+	var answerTextEnc []byte
+	if answerText != "" {
+		answerTextEnc, _ = s.codec.EncryptText(answerText)
+	}
+	if err := s.store.SaveQuestionAnswer(ctx, q.ID, answerTextEnc, answerFileID); err != nil {
+		s.log.Warn("сохранение ответа в БД", "err", err)
+	}
+
 	return s.store.ClearDialogState(ctx, recipientTgID)
 }
 

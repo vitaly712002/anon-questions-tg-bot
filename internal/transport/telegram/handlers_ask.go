@@ -73,7 +73,9 @@ func (r *Router) onReplyMessage(ctx context.Context, msg *models.Message) error 
 	if msg.HasProtectedContent {
 		return r.reply(ctx, msg.Chat.ID, userMessage(service.ErrProtected), nil)
 	}
-	if err := r.svc.Questions.Answer(ctx, msg.From.ID, msg.ID); err != nil {
+	text := extractText(msg)
+	fileID := extractFileID(msg)
+	if err := r.svc.Questions.Answer(ctx, msg.From.ID, msg.ID, text, fileID); err != nil {
 		return r.reply(ctx, msg.Chat.ID, userMessage(err), nil)
 	}
 	return r.reply(ctx, msg.Chat.ID, "✅ Ответ отправлен анонимно.", nil)

@@ -73,19 +73,22 @@ func (s *Storage) SaveQuestionContent(ctx context.Context, questionID int64, tex
 
 // QuestionFeedItem — строка вопроса для веб-панели.
 type QuestionFeedItem struct {
-	ID                int64     `json:"id"`
-	LinkID            int64     `json:"link_id"`
-	LinkToken         string    `json:"link_token"`
-	RecipientID       int64     `json:"recipient_id"`
-	RecipientTgID     int64     `json:"recipient_tg_id"`
-	RecipientUsername string    `json:"recipient_username"`
-	RecipientName     string    `json:"recipient_name"`
-	ContentType       string    `json:"content_type"`
-	FileID            *string   `json:"file_id"`
-	TextEnc           []byte    `json:"-"`
-	SenderUserEnc     []byte    `json:"-"`
-	Answered          bool      `json:"answered"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                int64      `json:"id"`
+	LinkID            int64      `json:"link_id"`
+	LinkToken         string     `json:"link_token"`
+	RecipientID       int64      `json:"recipient_id"`
+	RecipientTgID     int64      `json:"recipient_tg_id"`
+	RecipientUsername string     `json:"recipient_username"`
+	RecipientName     string     `json:"recipient_name"`
+	ContentType       string     `json:"content_type"`
+	FileID            *string    `json:"file_id"`
+	TextEnc           []byte     `json:"-"`
+	SenderUserEnc     []byte     `json:"-"`
+	Answered          bool       `json:"answered"`
+	AnswerTextEnc     []byte     `json:"-"`
+	AnswerFileID      *string    `json:"answer_file_id"`
+	AnsweredAt        *time.Time `json:"answered_at"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 // ListQuestionsAdmin возвращает вопросы с информацией о получателе.
@@ -94,7 +97,7 @@ func (s *Storage) ListQuestionsAdmin(ctx context.Context, limit, offset int) ([]
 		SELECT q.id, q.link_id, COALESCE(l.token, ''), q.recipient_id,
 		       u.tg_id, COALESCE(u.tg_username, ''), u.display_name,
 		       q.content_type, q.file_id, q.text_enc, q.sender_username_enc,
-		       q.answered, q.created_at
+		       q.answered, q.answer_text_enc, q.answer_file_id, q.answered_at, q.created_at
 		FROM questions q
 		JOIN users u ON q.recipient_id = u.id
 		LEFT JOIN links l ON q.link_id = l.id
@@ -110,19 +113,38 @@ func (s *Storage) ListQuestionsAdmin(ctx context.Context, limit, offset int) ([]
 	for rows.Next() {
 		var item QuestionFeedItem
 		var fileID *string
+		var answerFileID *string
 		err := rows.Scan(
 			&item.ID, &item.LinkID, &item.LinkToken, &item.RecipientID,
 			&item.RecipientTgID, &item.RecipientUsername, &item.RecipientName,
 			&item.ContentType, &fileID, &item.TextEnc, &item.SenderUserEnc,
-			&item.Answered, &item.CreatedAt,
+			&item.Answered, &item.AnswerTextEnc, &answerFileID, &item.AnsweredAt, &item.CreatedAt,
 		)
 		if err != nil {
 			return nil, err
 		}
 		item.FileID = fileID
+		item.AnswerFileID = answerFileID
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// SaveQuestionAnswer сохраняет зашифрованный текст ответа, медиафайл и время ответа.
+func (s *Storage) SaveQuestionAnswer(ctx context.Context, questionID int64, answerTextEnc []byte, answerFileID string) error {
+	var fileIDVal *string
+	if answerFileID != "" {
+		fileIDVal = &answerFileID
+	}
+	_, err := s.Pool.Exec(ctx, `
+		UPDATE questions
+		SET answered = TRUE,
+		    answer_text_enc = $2,
+		    answer_file_id = $3,
+		    answered_at = COALESCE(answered_at, now())
+		WHERE id = $1
+	`, questionID, answerTextEnc, fileIDVal)
+	return err
 }
 
 // UserListItem — пользователь бота для панели управления.

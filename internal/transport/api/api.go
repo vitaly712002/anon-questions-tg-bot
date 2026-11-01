@@ -192,19 +192,23 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 // QuestionView — расшифрованное представление вопроса для фронтенда.
 type QuestionView struct {
-	ID                int64     `json:"id"`
-	LinkToken         string    `json:"link_token"`
-	RecipientUsername string    `json:"recipient_username"`
-	RecipientName     string    `json:"recipient_name"`
-	RecipientTgID     int64     `json:"recipient_tg_id"`
-	SenderUsername    string    `json:"sender_username"`
-	SenderTgID        int64     `json:"sender_tg_id"`
-	ContentType       string    `json:"content_type"`
-	Text              string    `json:"text"`
-	FileID            *string   `json:"file_id"`
-	MediaURL          *string   `json:"media_url"`
-	Answered          bool      `json:"answered"`
-	CreatedAt         time.Time `json:"created_at"`
+	ID                int64      `json:"id"`
+	LinkToken         string     `json:"link_token"`
+	RecipientUsername string     `json:"recipient_username"`
+	RecipientName     string     `json:"recipient_name"`
+	RecipientTgID     int64      `json:"recipient_tg_id"`
+	SenderUsername    string     `json:"sender_username"`
+	SenderTgID        int64      `json:"sender_tg_id"`
+	ContentType       string     `json:"content_type"`
+	Text              string     `json:"text"`
+	FileID            *string    `json:"file_id"`
+	MediaURL          *string    `json:"media_url"`
+	Answered          bool       `json:"answered"`
+	AnswerText        string     `json:"answer_text,omitempty"`
+	AnswerFileID      *string    `json:"answer_file_id,omitempty"`
+	AnswerMediaURL    *string    `json:"answer_media_url,omitempty"`
+	AnsweredAt        *time.Time `json:"answered_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
 }
 
 func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
@@ -239,10 +243,19 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		// Расшифровка ID отправителя
 		senderTgID, _ := s.codec.DecryptSender(it.SenderUserEnc, it.ID)
 
+		// Расшифровка текста ответа
+		answerText, _ := s.codec.DecryptText(it.AnswerTextEnc)
+
 		var mediaURL *string
 		if it.FileID != nil && *it.FileID != "" {
 			url := "/api/media/" + *it.FileID
 			mediaURL = &url
+		}
+
+		var answerMediaURL *string
+		if it.AnswerFileID != nil && *it.AnswerFileID != "" {
+			url := "/api/media/" + *it.AnswerFileID
+			answerMediaURL = &url
 		}
 
 		views = append(views, QuestionView{
@@ -258,6 +271,10 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 			FileID:            it.FileID,
 			MediaURL:          mediaURL,
 			Answered:          it.Answered,
+			AnswerText:        answerText,
+			AnswerFileID:      it.AnswerFileID,
+			AnswerMediaURL:    answerMediaURL,
+			AnsweredAt:        it.AnsweredAt,
 			CreatedAt:         it.CreatedAt,
 		})
 	}

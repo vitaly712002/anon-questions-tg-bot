@@ -463,10 +463,13 @@ func (s *Questions) SendSenderCard(ctx context.Context, viewer gen.User, questio
 		"🕵️ Отправитель:\n├ Имя: %s\n├ Username: %s\n├ TG ID: %d\n└ Вопросов этому получателю: %d (%d за сутки)",
 		info.Name, username, senderTgID, total, today,
 	)
-	kb := Keyboard{Row(
-		Button{Text: "🚫 Забанить в боте", Data: CB(CBAdminPrefix, "banq", q.ID)},
-		Button{Text: "👁 Подписаться на него", Data: CB(CBAdminPrefix, "watchq", q.ID)},
-	)}
+	var kb Keyboard
+	if viewer.Role == gen.UserRoleSysadmin {
+		kb = Keyboard{Row(
+			Button{Text: "🚫 Забанить в боте", Data: CB(CBAdminPrefix, "banq", q.ID)},
+			Button{Text: "👁 Подписаться на него", Data: CB(CBAdminPrefix, "watchq", q.ID)},
+		)}
+	}
 	_, err = s.tg.SendMessage(ctx, viewer.TgID, text, kb)
 	return err
 }

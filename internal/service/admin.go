@@ -151,7 +151,7 @@ func (s *Admin) SetBanned(ctx context.Context, actor gen.User, targetID int64, b
 // отправителя / жалобе). Отправитель может быть не зарегистрирован — тогда
 // создаётся запись users, чтобы бан было где хранить.
 func (s *Admin) BanSenderOfQuestion(ctx context.Context, actor gen.User, questionID int64) error {
-	if !IsAdmin(actor) {
+	if actor.Role != gen.UserRoleSysadmin {
 		return ErrForbidden
 	}
 	senderUser, err := s.ensureSenderUser(ctx, actor, questionID, "ban")
@@ -169,7 +169,7 @@ func (s *Admin) BanSenderOfQuestion(ctx context.Context, actor gen.User, questio
 
 // WatchSenderOfQuestion подписывает админа на отправителя вопроса.
 func (s *Admin) WatchSenderOfQuestion(ctx context.Context, actor gen.User, questionID int64) error {
-	if !IsAdmin(actor) {
+	if actor.Role != gen.UserRoleSysadmin {
 		return ErrForbidden
 	}
 	senderUser, err := s.ensureSenderUser(ctx, actor, questionID, "watch")

@@ -80,11 +80,20 @@ func (r *Router) onAdminCallback(ctx context.Context, cb *models.CallbackQuery, 
 		return r.cbAdminBan(ctx, cb, viewer, rest, true)
 	case "unban":
 		return r.cbAdminBan(ctx, cb, viewer, rest, false)
-	case "banq": // из карточки отправителя: подтверждение глобального бана
+	case "banq": // из карточки отправителя: подтверждение глобального бана (только sysadmin)
+		if viewer.Role != gen.UserRoleSysadmin {
+			return r.ackCallback(ctx, cb, "Доступно только sysadmin", true)
+		}
 		return r.cbAdminBanQConfirm(ctx, cb, rest)
 	case "banqc":
+		if viewer.Role != gen.UserRoleSysadmin {
+			return r.ackCallback(ctx, cb, "Доступно только sysadmin", true)
+		}
 		return r.cbAdminBanQ(ctx, cb, viewer, rest)
-	case "watchq": // подписка на отправителя вопроса
+	case "watchq": // подписка на отправителя вопроса (только sysadmin)
+		if viewer.Role != gen.UserRoleSysadmin {
+			return r.ackCallback(ctx, cb, "Доступно только sysadmin", true)
+		}
 		return r.cbAdminWatchQ(ctx, cb, viewer, rest)
 	default:
 		return r.ackCallback(ctx, cb, "", false)

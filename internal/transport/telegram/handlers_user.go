@@ -103,7 +103,13 @@ func (r *Router) cmdStart(ctx context.Context, msg *models.Message) error {
 
 // cmdStartAsking — гость открыл чью-то ссылку: /start q_<токен> или /start <алиас>.
 func (r *Router) cmdStartAsking(ctx context.Context, msg *models.Message, arg string) error {
-	name, err := r.svc.Questions.StartAsking(ctx, msg.From.ID, arg, r.svc.Links)
+	in := service.StartAskingInput{
+		GuestTgID:        msg.From.ID,
+		GuestUsername:    msg.From.Username,
+		GuestDisplayName: displayName(msg.From),
+		StartArg:         arg,
+	}
+	name, err := r.svc.Questions.StartAsking(ctx, in, r.svc.Links)
 	if err != nil {
 		return r.reply(ctx, msg.Chat.ID, userMessage(err), nil)
 	}

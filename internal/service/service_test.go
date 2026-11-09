@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -79,6 +80,53 @@ func (f *fakeStore) GetLinkByID(_ context.Context, id int64) (gen.Link, error) {
 		return gen.Link{}, pgx.ErrNoRows
 	}
 	return l, nil
+}
+
+func (f *fakeStore) GetLinkByToken(_ context.Context, token string) (gen.Link, error) {
+	for _, l := range f.links {
+		if l.Token == token {
+			return l, nil
+		}
+	}
+	return gen.Link{}, pgx.ErrNoRows
+}
+
+func (f *fakeStore) GetLinkByAlias(_ context.Context, alias string) (gen.Link, error) {
+	for _, l := range f.links {
+		if l.Alias != nil && *l.Alias == alias {
+			return l, nil
+		}
+	}
+	return gen.Link{}, pgx.ErrNoRows
+}
+
+func (f *fakeStore) IncrementLinkClicks(_ context.Context, id int64) error {
+	l := f.links[id]
+	l.Clicks++
+	f.links[id] = l
+	return nil
+}
+
+func (f *fakeStore) UpsertUser(_ context.Context, arg gen.UpsertUserParams) (gen.User, error) {
+	for id, u := range f.users {
+		if u.TgID == arg.TgID {
+			u.DisplayName = arg.DisplayName
+			u.TgUsername = arg.TgUsername
+			f.users[id] = u
+			return u, nil
+		}
+	}
+	nextID := int64(len(f.users) + 1)
+	u := gen.User{
+		ID:          nextID,
+		TgID:        arg.TgID,
+		TgUsername:  arg.TgUsername,
+		DisplayName: arg.DisplayName,
+		Role:        gen.UserRoleUser,
+		Accepting:   true,
+	}
+	f.users[nextID] = u
+	return u, nil
 }
 
 func (f *fakeStore) GetUserByID(_ context.Context, id int64) (gen.User, error) {
@@ -529,6 +577,178 @@ func TestSetRole_Permissions(t *testing.T) {
 	// Аудит записан.
 	if len(store.audits) == 0 || store.audits[0].Action != "role_granted" {
 		t.Errorf("аудит: %+v", store.audits)
+	}
+}
+
+func TestStartAsking_UserRole_NoNotification(t *testing.T) {
+	store := newFakeStore()
+	user := gen.User{ID: 1, TgID: 100, DisplayName: "Обычный юзер", Role: gen.UserRoleUser, Accepting: true}
+	store.users[1] = user
+	store.links[1] = gen.Link{ID: 1, UserID: 1, Token: "q_testtoken", IsActive: true}
+
+	tg := &fakeTG{}
+	q := NewQuestions(store, testCodec(t), tg, fakeLimiter{allow: true}, 20, slog.Default())
+	links := NewLinks(store, "testbot")
+
+	in := StartAskingInput{
+		GuestTgID:        200,
+		GuestUsername:    "guest_user",
+		GuestDisplayName: "Гость",
+		StartArg:         "q_testtoken",
+	}
+
+	name, err := q.StartAsking(context.Background(), in, links)
+	if err != nil {
+		t.Fatalf("StartAsking: %v", err)
+	}
+	if name != "Обычный юзер" {
+		t.Errorf("got name %q, want %q", name, "Обычный юзер")
+	}
+
+	// Обычному пользователю не должно приходить уведомление
+	if len(tg.sent) != 0 {
+		t.Errorf("обычному пользователю отправлено %d сообщений, ожидалось 0", len(tg.sent))
+	}
+	// Клики должны увеличиться
+	if store.links[1].Clicks != 1 {
+		t.Errorf("клики: %d, ожидалось 1", store.links[1].Clicks)
+	}
+}
+
+func TestStartAsking_AdminRole_GetsNotification(t *testing.T) {
+	store := newFakeStore()
+	admin := gen.User{ID: 1, TgID: 100, DisplayName: "Админ", Role: gen.UserRoleAdmin, Accepting: true}
+	store.users[1] = admin
+	alias := "myadmin"
+	store.links[1] = gen.Link{ID: 1, UserID: 1, Token: "q_admintoken", Alias: &alias, IsActive: true}
+
+	tg := &fakeTG{}
+	q := NewQuestions(store, testCodec(t), tg, fakeLimiter{allow: true}, 20, slog.Default())
+	links := NewLinks(store, "testbot")
+
+	in := StartAskingInput{
+		GuestTgID:        200,
+		GuestUsername:    "curious_guest",
+		GuestDisplayName: "Любопытный Гость",
+		StartArg:         "myadmin",
+	}
+
+	name, err := q.StartAsking(context.Background(), in, links)
+	if err != nil {
+		t.Fatalf("StartAsking: %v", err)
+	}
+	if name != "Админ" {
+		t.Errorf("got name %q, want %q", name, "Админ")
+	}
+
+	// Админу должно прийти уведомление
+	if len(tg.sent) != 1 {
+		t.Fatalf("админу отправлено %d сообщений, ожидалось 1", len(tg.sent))
+	}
+	msg := tg.sent[0]
+	if msg.chatID != 100 {
+		t.Errorf("сообщение отправлено не админу: %+v", msg)
+	}
+	if !strings.Contains(msg.text, "Переход по вашей ссылке") {
+		t.Errorf("текст не содержит заголовка перехода: %s", msg.text)
+	}
+	if !strings.Contains(msg.text, "Любопытный Гость") || !strings.Contains(msg.text, "@curious_guest") || !strings.Contains(msg.text, "200") {
+		t.Errorf("текст не содержит данных гостя: %s", msg.text)
+	}
+	if !strings.Contains(msg.text, "https://t.me/testbot?start=myadmin") {
+		t.Errorf("текст не содержит ссылки: %s", msg.text)
+	}
+
+	// Кнопки отсутствуют — просто информативное уведомление
+	if len(msg.kb) != 0 {
+		t.Fatalf("в уведомлении не должно быть кнопок: %+v", msg.kb)
+	}
+}
+
+func TestStartAsking_SysadminRole_GetsNotification(t *testing.T) {
+	store := newFakeStore()
+	sysadmin := gen.User{ID: 1, TgID: 100, DisplayName: "Сисадмин", Role: gen.UserRoleSysadmin, Accepting: true}
+	store.users[1] = sysadmin
+	store.links[1] = gen.Link{ID: 1, UserID: 1, Token: "q_systoken", IsActive: true}
+
+	tg := &fakeTG{}
+	q := NewQuestions(store, testCodec(t), tg, fakeLimiter{allow: true}, 20, slog.Default())
+	links := NewLinks(store, "testbot")
+
+	in := StartAskingInput{
+		GuestTgID:        300,
+		GuestUsername:    "",
+		GuestDisplayName: "Аноним без юзернейма",
+		StartArg:         "q_systoken",
+	}
+
+	_, err := q.StartAsking(context.Background(), in, links)
+	if err != nil {
+		t.Fatalf("StartAsking: %v", err)
+	}
+
+	if len(tg.sent) != 1 {
+		t.Fatalf("сисадмину отправлено %d сообщений, ожидалось 1", len(tg.sent))
+	}
+	msg := tg.sent[0]
+	if !strings.Contains(msg.text, "Username: —") {
+		t.Errorf("ожидался пустой юзернейм '—': %s", msg.text)
+	}
+}
+
+func TestStartAsking_AdminClicksOwnLink_NoNotification(t *testing.T) {
+	store := newFakeStore()
+	admin := gen.User{ID: 1, TgID: 100, DisplayName: "Админ", Role: gen.UserRoleAdmin, Accepting: true}
+	store.users[1] = admin
+	store.links[1] = gen.Link{ID: 1, UserID: 1, Token: "q_admintoken", IsActive: true}
+
+	tg := &fakeTG{}
+	q := NewQuestions(store, testCodec(t), tg, fakeLimiter{allow: true}, 20, slog.Default())
+	links := NewLinks(store, "testbot")
+
+	// Админ открывает собственную ссылку
+	in := StartAskingInput{
+		GuestTgID:        100,
+		GuestUsername:    "admin",
+		GuestDisplayName: "Админ",
+		StartArg:         "q_admintoken",
+	}
+
+	_, err := q.StartAsking(context.Background(), in, links)
+	if err != nil {
+		t.Fatalf("StartAsking: %v", err)
+	}
+
+	if len(tg.sent) != 0 {
+		t.Errorf("при переходе по своей же ссылке не должно быть уведомлений, получено: %d", len(tg.sent))
+	}
+}
+
+func TestStartAsking_BurstLimit(t *testing.T) {
+	store := newFakeStore()
+	admin := gen.User{ID: 1, TgID: 100, DisplayName: "Админ", Role: gen.UserRoleAdmin, Accepting: true}
+	store.users[1] = admin
+	store.links[1] = gen.Link{ID: 1, UserID: 1, Token: "q_admintoken", IsActive: true}
+
+	tg := &fakeTG{}
+	// Лимитер блокирует событие
+	q := NewQuestions(store, testCodec(t), tg, fakeLimiter{allow: false}, 20, slog.Default())
+	links := NewLinks(store, "testbot")
+
+	in := StartAskingInput{
+		GuestTgID:        200,
+		GuestUsername:    "guest",
+		GuestDisplayName: "Гость",
+		StartArg:         "q_admintoken",
+	}
+
+	_, err := q.StartAsking(context.Background(), in, links)
+	if err != nil {
+		t.Fatalf("StartAsking: %v", err)
+	}
+
+	if len(tg.sent) != 0 {
+		t.Errorf("при срабатывании burst-лимита уведомление должно быть подавлено, получено: %d", len(tg.sent))
 	}
 }
 

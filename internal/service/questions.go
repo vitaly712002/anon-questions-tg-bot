@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -32,11 +33,20 @@ func NewQuestions(store Store, codec *crypto.Codec, tg TG, burst BurstLimiter, d
 	return &Questions{store: store, codec: codec, tg: tg, burst: burst, dailyLimit: dailyLimit, log: log}
 }
 
+// StartAskingInput — параметры перехода гостя по ссылке.
+type StartAskingInput struct {
+	GuestTgID        int64
+	GuestUsername    string // без @, может быть пустой
+	GuestDisplayName string
+	StartArg         string
+}
+
 // StartAsking переводит гостя в состояние «пишет вопрос» по /start <токен|алиас>.
 // Возвращает имя получателя для приветственного текста.
+// Если получатель admin или sysadmin — отправляет ему уведомление о переходе по его ссылке.
 // Если гость заблокирован получателем — не сообщаем об этом (silent drop при Submit).
-func (s *Questions) StartAsking(ctx context.Context, guestTgID int64, startArg string, links *Links) (string, error) {
-	link, owner, err := links.Resolve(ctx, startArg)
+func (s *Questions) StartAsking(ctx context.Context, in StartAskingInput, links *Links) (string, error) {
+	link, owner, err := links.Resolve(ctx, in.StartArg)
 	if err != nil {
 		return "", err
 	}
@@ -47,14 +57,106 @@ func (s *Questions) StartAsking(ctx context.Context, guestTgID int64, startArg s
 		return "", err
 	}
 	err = s.store.SetDialogState(ctx, gen.SetDialogStateParams{
-		TgID:    guestTgID,
+		TgID:    in.GuestTgID,
 		State:   StateAsking,
 		Payload: MarshalPayload(DialogPayload{LinkID: link.ID}),
 	})
 	if err != nil {
 		return "", err
 	}
+
+	// Уведомление пользователю с ролью admin или sysadmin о переходе по его ссылке
+	if (owner.Role == gen.UserRoleAdmin || owner.Role == gen.UserRoleSysadmin) && in.GuestTgID != owner.TgID {
+		if err := s.notifyAdminLinkClick(ctx, owner, link, in, links); err != nil {
+			s.log.Warn("не удалось отправить уведомление о переходе по ссылке",
+				"owner_id", owner.ID, "guest_tg_id", in.GuestTgID, "err", err)
+		}
+	}
+
 	return owner.DisplayName, nil
+}
+
+// notifyAdminLinkClick отправляет уведомление пользователю с ролью admin/sysadmin о переходе по его ссылке.
+func (s *Questions) notifyAdminLinkClick(ctx context.Context, owner gen.User, link gen.Link, in StartAskingInput, links *Links) error {
+	burstKey := fmt.Sprintf("link_click:%d:%d", owner.ID, in.GuestTgID)
+	if s.burst != nil && !s.burst.Allow(burstKey) {
+		if s.log != nil {
+			s.log.Debug("уведомление о переходе пропущено по burst limit", "owner_id", owner.ID, "guest_tg_id", in.GuestTgID)
+		}
+		return nil
+	}
+
+	name := in.GuestDisplayName
+	usernameStr := in.GuestUsername
+	if name == "" {
+		if info, err := s.tg.GetChatInfo(ctx, in.GuestTgID); err == nil && info.Name != "" {
+			name = info.Name
+			if usernameStr == "" && info.Username != "" {
+				usernameStr = info.Username
+			}
+		}
+	}
+	if name == "" {
+		name = "Анонимный пользователь"
+	}
+
+	var usernamePtr *string
+	displayUsername := "—"
+	if usernameStr != "" {
+		clean := strings.TrimPrefix(usernameStr, "@")
+		displayUsername = "@" + clean
+		usernamePtr = &clean
+	}
+
+	// Гарантируем наличие пользователя в БД для возможности дальнейших действий (бан, подписка, просмотр карточки)
+	guestUser, err := s.store.UpsertUser(ctx, gen.UpsertUserParams{
+		TgID:        in.GuestTgID,
+		TgUsername:  usernamePtr,
+		DisplayName: name,
+	})
+	if err != nil && s.log != nil {
+		s.log.Warn("notifyAdminLinkClick: не удалось сохранить гостя в БД", "err", err)
+	}
+
+	linkURL := ""
+	if links != nil {
+		linkURL = links.URL(link)
+	} else {
+		linkURL = link.Token
+	}
+
+	var extraInfo []string
+	if guestUser.Banned {
+		extraInfo = append(extraInfo, "├ Статус: 🚫 Забанен в боте")
+	}
+
+	// Предыдущие вопросы от этого отправителя данному получателю
+	senderHash := s.codec.SenderHash(in.GuestTgID)
+	prevQuestions, _ := s.store.CountQuestionsFromSenderToRecipient(ctx, gen.CountQuestionsFromSenderToRecipientParams{
+		SenderHash:  senderHash,
+		RecipientID: owner.ID,
+	})
+	if prevQuestions > 0 {
+		extraInfo = append(extraInfo, fmt.Sprintf("├ Вопросов вам ранее: %d", prevQuestions))
+	}
+
+	extraStr := ""
+	if len(extraInfo) > 0 {
+		extraStr = "\n" + strings.Join(extraInfo, "\n")
+	}
+
+	text := fmt.Sprintf(
+		"🔔 Переход по вашей ссылке!\n\n"+
+			"Кто-то открыл вашу персональную ссылку:\n"+
+			"├ Имя: %s\n"+
+			"├ Username: %s\n"+
+			"├ TG ID: %d%s\n"+
+			"└ Ссылка: %s",
+		name, displayUsername, in.GuestTgID, extraStr, linkURL,
+	)
+
+	_, err = s.tg.SendMessage(ctx, owner.TgID, text, nil)
+	return err
 }
 
 // SubmitInput — входные данные принятого сообщения-вопроса.

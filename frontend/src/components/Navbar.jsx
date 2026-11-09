@@ -1,10 +1,11 @@
 import React from 'react';
-import { MessageSquare, Users, Settings, BarChart2, LogOut, Shield } from 'lucide-react';
+import { MessageSquare, Users, Settings, BarChart2, LogOut, Shield, Link2 } from 'lucide-react';
 
 export default function Navbar({ activeTab, setActiveTab, user, onLogout }) {
   const tabs = [
     { id: 'dashboard', label: 'Обзор', icon: BarChart2 },
     { id: 'questions', label: 'Вопросы (Feed)', icon: MessageSquare },
+    { id: 'visits', label: 'Переходы по ссылкам', icon: Link2 },
     { id: 'users', label: 'Пользователи', icon: Users },
     { id: 'settings', label: 'Настройки бота', icon: Settings },
   ];

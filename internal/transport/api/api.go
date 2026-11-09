@@ -49,6 +49,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/me", s.cors(s.auth(s.handleMe)))
 	mux.HandleFunc("/api/stats", s.cors(s.auth(s.handleStats)))
 	mux.HandleFunc("/api/questions", s.cors(s.auth(s.handleQuestions)))
+	mux.HandleFunc("/api/link-visits", s.cors(s.auth(s.handleLinkVisits)))
 	mux.HandleFunc("/api/users", s.cors(s.auth(s.handleUsers)))
 	mux.HandleFunc("/api/users/", s.cors(s.auth(s.handleUserAction)))
 	mux.HandleFunc("/api/settings", s.cors(s.auth(s.handleSettings)))
@@ -281,6 +282,33 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(views)
+}
+
+func (s *Server) handleLinkVisits(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	offset := 0
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	if o := r.URL.Query().Get("offset"); o != "" {
+		if n, err := strconv.Atoi(o); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	visits, err := s.store.ListLinkVisitsAdmin(r.Context(), limit, offset)
+	if err != nil {
+		s.log.Error("list link visits", "err", err)
+		http.Error(w, `{"error":"ошибка получения переходов по ссылкам"}`, http.StatusInternalServerError)
+		return
+	}
+	if visits == nil {
+		visits = []storage.LinkVisitItem{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(visits)
 }
 
 func (s *Server) handleUsers(w http.ResponseWriter, r *http.Request) {

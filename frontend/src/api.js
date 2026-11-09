@@ -48,6 +48,12 @@ export async function getQuestions(limit = 50, offset = 0) {
   return res.json();
 }
 
+export async function getLinkVisits(limit = 50, offset = 0) {
+  const res = await fetch(`${API_BASE}/link-visits?limit=${limit}&offset=${offset}`, { headers: getHeaders() });
+  if (res.status === 401) { logout(); window.location.reload(); }
+  return res.json();
+}
+
 export async function getUsers() {
   const res = await fetch(`${API_BASE}/users`, { headers: getHeaders() });
   if (res.status === 401) { logout(); window.location.reload(); }

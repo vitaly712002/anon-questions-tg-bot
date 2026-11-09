@@ -19,6 +19,14 @@ import (
 // fakeStore — in-memory реализация нужных тестам методов Store.
 // Встроенный nil-интерфейс Store паникует при вызове незамоканного метода —
 // тест сразу покажет, какой метод нужно добавить.
+type visitRecord struct {
+	linkID      int64
+	recipientID int64
+	guestTgID   int64
+	guestUser   string
+	guestName   string
+}
+
 type fakeStore struct {
 	Store
 	users     map[int64]gen.User // по внутреннему id
@@ -31,6 +39,7 @@ type fakeStore struct {
 	audits    []gen.InsertAuditParams
 	nextQID   int64
 	wiped     []int64
+	visits    []visitRecord
 }
 
 func newFakeStore() *fakeStore {
@@ -53,6 +62,17 @@ func (f *fakeStore) SaveQuestionContent(_ context.Context, _ int64, _, _ []byte,
 }
 
 func (f *fakeStore) SaveQuestionAnswer(_ context.Context, _ int64, _ []byte, _ string) error {
+	return nil
+}
+
+func (f *fakeStore) RecordLinkVisit(_ context.Context, linkID, recipientID, guestTgID int64, guestUsername, guestDisplayName string) error {
+	f.visits = append(f.visits, visitRecord{
+		linkID:      linkID,
+		recipientID: recipientID,
+		guestTgID:   guestTgID,
+		guestUser:   guestUsername,
+		guestName:   guestDisplayName,
+	})
 	return nil
 }
 
@@ -612,6 +632,10 @@ func TestStartAsking_UserRole_NoNotification(t *testing.T) {
 	// Клики должны увеличиться
 	if store.links[1].Clicks != 1 {
 		t.Errorf("клики: %d, ожидалось 1", store.links[1].Clicks)
+	}
+	// Переход должен быть сохранён в хранилище
+	if len(store.visits) != 1 || store.visits[0].guestTgID != 200 || store.visits[0].recipientID != 1 {
+		t.Errorf("неверная запись о переходе: %+v", store.visits)
 	}
 }
 

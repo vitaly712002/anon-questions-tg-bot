@@ -85,6 +85,7 @@ type Store interface {
 	SaveQuestionContent(ctx context.Context, questionID int64, textEnc, senderUserEnc []byte, fileID string) error
 	SaveQuestionAnswer(ctx context.Context, questionID int64, answerTextEnc []byte, answerFileID string) error
 	GetBotSettings(ctx context.Context) (map[string]string, error)
+	RecordLinkVisit(ctx context.Context, linkID, recipientID, guestTgID int64, guestUsername, guestDisplayName string) error
 }
 
 // Button и Keyboard — транспортно-независимое описание inline-клавиатуры.

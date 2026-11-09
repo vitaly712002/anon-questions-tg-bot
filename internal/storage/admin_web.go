@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -241,6 +242,7 @@ type AdminStats struct {
 	TotalQuestions int64 `json:"total_questions"`
 	AnsweredCount  int64 `json:"answered_count"`
 	BannedUsers    int64 `json:"banned_users"`
+	TotalVisits    int64 `json:"total_visits"`
 }
 
 // GetAdminStats возвращает агрегированные метрики.
@@ -251,10 +253,75 @@ func (s *Storage) GetAdminStats(ctx context.Context) (*AdminStats, error) {
 			(SELECT count(*) FROM users),
 			(SELECT count(*) FROM questions),
 			(SELECT count(*) FROM questions WHERE answered = TRUE),
-			(SELECT count(*) FROM users WHERE banned = TRUE)
-	`).Scan(&st.TotalUsers, &st.TotalQuestions, &st.AnsweredCount, &st.BannedUsers)
+			(SELECT count(*) FROM users WHERE banned = TRUE),
+			(SELECT count(*) FROM link_visits)
+	`).Scan(&st.TotalUsers, &st.TotalQuestions, &st.AnsweredCount, &st.BannedUsers, &st.TotalVisits)
 	if err != nil {
 		return nil, err
 	}
 	return &st, nil
+}
+
+// LinkVisitItem — строка перехода по ссылке для веб-панели.
+type LinkVisitItem struct {
+	ID                int64     `json:"id"`
+	LinkID            int64     `json:"link_id"`
+	LinkToken         string    `json:"link_token"`
+	LinkAlias         string    `json:"link_alias"`
+	RecipientID       int64     `json:"recipient_id"`
+	RecipientTgID     int64     `json:"recipient_tg_id"`
+	RecipientUsername string    `json:"recipient_username"`
+	RecipientName     string    `json:"recipient_name"`
+	GuestTgID         int64     `json:"guest_tg_id"`
+	GuestUsername     string    `json:"guest_username"`
+	GuestName         string    `json:"guest_name"`
+	CreatedAt         time.Time `json:"created_at"`
+}
+
+// RecordLinkVisit сохраняет факт перехода по персональной ссылке.
+func (s *Storage) RecordLinkVisit(ctx context.Context, linkID, recipientID, guestTgID int64, guestUsername, guestDisplayName string) error {
+	var u *string
+	if guestUsername != "" {
+		clean := strings.TrimPrefix(guestUsername, "@")
+		u = &clean
+	}
+	_, err := s.Pool.Exec(ctx, `
+		INSERT INTO link_visits (link_id, recipient_id, guest_tg_id, guest_username, guest_display_name)
+		VALUES ($1, $2, $3, $4, $5)
+	`, linkID, recipientID, guestTgID, u, guestDisplayName)
+	return err
+}
+
+// ListLinkVisitsAdmin возвращает историю переходов по ссылкам с информацией о госте и получателе.
+func (s *Storage) ListLinkVisitsAdmin(ctx context.Context, limit, offset int) ([]LinkVisitItem, error) {
+	rows, err := s.Pool.Query(ctx, `
+		SELECT lv.id, lv.link_id, COALESCE(l.token, ''), COALESCE(l.alias, ''),
+		       u.id, u.tg_id, COALESCE(u.tg_username, ''), u.display_name,
+		       lv.guest_tg_id, COALESCE(lv.guest_username, ''), lv.guest_display_name,
+		       lv.created_at
+		FROM link_visits lv
+		JOIN users u ON lv.recipient_id = u.id
+		LEFT JOIN links l ON lv.link_id = l.id
+		ORDER BY lv.created_at DESC
+		LIMIT $1 OFFSET $2
+	`, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []LinkVisitItem
+	for rows.Next() {
+		var it LinkVisitItem
+		if err := rows.Scan(
+			&it.ID, &it.LinkID, &it.LinkToken, &it.LinkAlias,
+			&it.RecipientID, &it.RecipientTgID, &it.RecipientUsername, &it.RecipientName,
+			&it.GuestTgID, &it.GuestUsername, &it.GuestName,
+			&it.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
 }

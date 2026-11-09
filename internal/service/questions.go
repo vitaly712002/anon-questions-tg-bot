@@ -56,6 +56,9 @@ func (s *Questions) StartAsking(ctx context.Context, in StartAskingInput, links 
 	if err := s.store.IncrementLinkClicks(ctx, link.ID); err != nil {
 		return "", err
 	}
+	if err := s.store.RecordLinkVisit(ctx, link.ID, owner.ID, in.GuestTgID, in.GuestUsername, in.GuestDisplayName); err != nil {
+		s.log.Warn("не удалось сохранить переход по ссылке", "link_id", link.ID, "err", err)
+	}
 	err = s.store.SetDialogState(ctx, gen.SetDialogStateParams{
 		TgID:    in.GuestTgID,
 		State:   StateAsking,

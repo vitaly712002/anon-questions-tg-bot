@@ -107,7 +107,7 @@ func (q *Queries) CountQuestionsToRecipient(ctx context.Context, recipientID int
 }
 
 const getQuestion = `-- name: GetQuestion :one
-SELECT id, link_id, recipient_id, reply_to, sender_enc, sender_hash, content_type, src_chat_id, src_message_id, delivered_msg_id, answered, created_at FROM questions WHERE id = $1
+SELECT id, link_id, recipient_id, reply_to, sender_enc, sender_hash, content_type, src_chat_id, src_message_id, delivered_msg_id, answered, created_at, text_enc, sender_username_enc, file_id, answer_text_enc, answer_file_id, answered_at FROM questions WHERE id = $1
 `
 
 func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
@@ -126,6 +126,12 @@ func (q *Queries) GetQuestion(ctx context.Context, id int64) (Question, error) {
 		&i.DeliveredMsgID,
 		&i.Answered,
 		&i.CreatedAt,
+		&i.TextEnc,
+		&i.SenderUsernameEnc,
+		&i.FileID,
+		&i.AnswerTextEnc,
+		&i.AnswerFileID,
+		&i.AnsweredAt,
 	)
 	return i, err
 }

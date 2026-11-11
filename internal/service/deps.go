@@ -30,6 +30,7 @@ type Querier interface {
 	SetUserAccepting(ctx context.Context, arg gen.SetUserAcceptingParams) error
 	SetUserBanned(ctx context.Context, arg gen.SetUserBannedParams) error
 	ListAdmins(ctx context.Context) ([]gen.User, error)
+	ListSysadmins(ctx context.Context) ([]gen.User, error)
 	ListBannedUsers(ctx context.Context) ([]gen.User, error)
 	CountUsers(ctx context.Context) (int64, error)
 

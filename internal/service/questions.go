@@ -478,9 +478,9 @@ func (s *Questions) StartContinue(ctx context.Context, senderTgID, questionID in
 	})
 }
 
-// Report — жалоба получателя (кнопка ⚠️): контент пересылается всем админам
+// Report — жалоба получателя (кнопка ⚠️): контент пересылается всем сисадминам
 // из чата получателя по delivered_msg_id (src_* уже затёрты — docs/09),
-// плюс карточка отправителя каждому админу.
+// плюс карточка отправителя каждому сисадмину.
 func (s *Questions) Report(ctx context.Context, reporterTgID, questionID int64) error {
 	reporter, err := s.store.GetUserByTgID(ctx, reporterTgID)
 	if err != nil {
@@ -503,24 +503,24 @@ func (s *Questions) Report(ctx context.Context, reporterTgID, questionID int64) 
 		return err
 	}
 
-	admins, err := s.store.ListAdmins(ctx)
+	sysadmins, err := s.store.ListSysadmins(ctx)
 	if err != nil {
 		return err
 	}
-	for _, admin := range admins {
-		if admin.ID == reporter.ID {
-			continue // жалобщик-админ и так всё видел
+	for _, sysadmin := range sysadmins {
+		if sysadmin.ID == reporter.ID {
+			continue // жалобщик-сисадмин и так всё видел
 		}
 		header := fmt.Sprintf("⚠️ Жалоба на вопрос #%d (получатель id %d):", q.ID, reporter.ID)
-		if _, err := s.tg.SendMessage(ctx, admin.TgID, header, nil); err != nil {
-			s.log.Warn("жалоба: заголовок не доставлен админу", "err", err)
+		if _, err := s.tg.SendMessage(ctx, sysadmin.TgID, header, nil); err != nil {
+			s.log.Warn("жалоба: заголовок не доставлен сисадмину", "err", err)
 			continue
 		}
-		if _, err := s.tg.CopyMessage(ctx, admin.TgID, reporter.TgID, int(*q.DeliveredMsgID), nil); err != nil {
-			s.log.Warn("жалоба: копия не доставлена админу", "err", err)
+		if _, err := s.tg.CopyMessage(ctx, sysadmin.TgID, reporter.TgID, int(*q.DeliveredMsgID), nil); err != nil {
+			s.log.Warn("жалоба: копия не доставлена сисадмину", "err", err)
 		}
-		if err := s.SendSenderCard(ctx, admin, q.ID); err != nil {
-			s.log.Warn("жалоба: карточка не доставлена админу", "err", err)
+		if err := s.SendSenderCard(ctx, sysadmin, q.ID); err != nil {
+			s.log.Warn("жалоба: карточка не доставлена сисадмину", "err", err)
 		}
 	}
 	return nil

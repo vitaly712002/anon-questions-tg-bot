@@ -246,6 +246,26 @@ func (f *fakeStore) SetUserRole(_ context.Context, arg gen.SetUserRoleParams) er
 	return nil
 }
 
+func (f *fakeStore) ListSysadmins(_ context.Context) ([]gen.User, error) {
+	var res []gen.User
+	for _, u := range f.users {
+		if u.Role == gen.UserRoleSysadmin {
+			res = append(res, u)
+		}
+	}
+	return res, nil
+}
+
+func (f *fakeStore) ListAdmins(_ context.Context) ([]gen.User, error) {
+	var res []gen.User
+	for _, u := range f.users {
+		if u.Role == gen.UserRoleAdmin || u.Role == gen.UserRoleSysadmin {
+			res = append(res, u)
+		}
+	}
+	return res, nil
+}
+
 // sent — записанное исходящее сообщение фейкового Telegram.
 type sent struct {
 	chatID int64
@@ -773,6 +793,77 @@ func TestStartAsking_BurstLimit(t *testing.T) {
 
 	if len(tg.sent) != 0 {
 		t.Errorf("при срабатывании burst-лимита уведомление должно быть подавлено, получено: %d", len(tg.sent))
+	}
+}
+
+func TestReport_OnlySysadmins(t *testing.T) {
+	store := newFakeStore()
+	codec := testCodec(t)
+	tg := &fakeTG{}
+	q := NewQuestions(store, codec, tg, fakeLimiter{allow: true}, 20, slog.Default())
+
+	recipient := gen.User{ID: 1, TgID: 100, DisplayName: "Получатель", Role: gen.UserRoleUser, Accepting: true}
+	adminUser := gen.User{ID: 2, TgID: 200, DisplayName: "Обычный Админ", Role: gen.UserRoleAdmin, Accepting: true}
+	sysadmin1 := gen.User{ID: 3, TgID: 300, DisplayName: "Сисадмин 1", Role: gen.UserRoleSysadmin, Accepting: true}
+	sysadmin2 := gen.User{ID: 4, TgID: 400, DisplayName: "Сисадмин 2", Role: gen.UserRoleSysadmin, Accepting: true}
+
+	store.users[1] = recipient
+	store.users[2] = adminUser
+	store.users[3] = sysadmin1
+	store.users[4] = sysadmin2
+
+	senderEnc, err := codec.EncryptSender(777, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	delivID := int64(12345)
+	store.questions[10] = gen.Question{
+		ID:             10,
+		LinkID:         1,
+		RecipientID:    recipient.ID,
+		SenderEnc:      senderEnc,
+		ContentType:    "text",
+		DeliveredMsgID: &delivID,
+	}
+
+	ctx := context.Background()
+	if err := q.Report(ctx, recipient.TgID, 10); err != nil {
+		t.Fatalf("Report: %v", err)
+	}
+
+	var gotAdmin, gotSysadmin1, gotSysadmin2 bool
+	for _, s := range tg.sent {
+		if s.chatID == adminUser.TgID {
+			gotAdmin = true
+		}
+		if s.chatID == sysadmin1.TgID {
+			gotSysadmin1 = true
+		}
+		if s.chatID == sysadmin2.TgID {
+			gotSysadmin2 = true
+		}
+	}
+
+	if gotAdmin {
+		t.Errorf("обычный admin получил жалобу, а должен получать только sysadmin")
+	}
+	if !gotSysadmin1 {
+		t.Errorf("sysadmin 1 не получил жалобу")
+	}
+	if !gotSysadmin2 {
+		t.Errorf("sysadmin 2 не получил жалобу")
+	}
+
+	var reportedAudit bool
+	for _, a := range store.audits {
+		if a.Action == "question_reported" && a.ActorID == recipient.ID {
+			reportedAudit = true
+			break
+		}
+	}
+	if !reportedAudit {
+		t.Errorf("в audit_log не найдена запись о question_reported")
 	}
 }
 

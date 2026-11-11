@@ -54,6 +54,14 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type AdminAccount struct {
+	ID           int64
+	Username     string
+	PasswordHash string
+	Role         string
+	CreatedAt    pgtype.Timestamptz
+}
+
 type AdminWatch struct {
 	AdminID   int64
 	TargetID  int64
@@ -75,6 +83,11 @@ type Block struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type BotSetting struct {
+	Key   string
+	Value string
+}
+
 type DialogState struct {
 	TgID      int64
 	State     string
@@ -92,19 +105,35 @@ type Link struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+type LinkVisit struct {
+	ID               int64
+	LinkID           int64
+	RecipientID      int64
+	GuestTgID        int64
+	GuestUsername    *string
+	GuestDisplayName string
+	CreatedAt        pgtype.Timestamptz
+}
+
 type Question struct {
-	ID             int64
-	LinkID         int64
-	RecipientID    int64
-	ReplyTo        *int64
-	SenderEnc      []byte
-	SenderHash     []byte
-	ContentType    string
-	SrcChatID      int64
-	SrcMessageID   int64
-	DeliveredMsgID *int64
-	Answered       bool
-	CreatedAt      pgtype.Timestamptz
+	ID                int64
+	LinkID            int64
+	RecipientID       int64
+	ReplyTo           *int64
+	SenderEnc         []byte
+	SenderHash        []byte
+	ContentType       string
+	SrcChatID         int64
+	SrcMessageID      int64
+	DeliveredMsgID    *int64
+	Answered          bool
+	CreatedAt         pgtype.Timestamptz
+	TextEnc           []byte
+	SenderUsernameEnc []byte
+	FileID            *string
+	AnswerTextEnc     []byte
+	AnswerFileID      *string
+	AnsweredAt        pgtype.Timestamptz
 }
 
 type User struct {

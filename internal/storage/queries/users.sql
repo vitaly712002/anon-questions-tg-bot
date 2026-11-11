@@ -32,6 +32,9 @@ UPDATE users SET banned = $2, updated_at = now() WHERE id = $1;
 -- name: ListAdmins :many
 SELECT * FROM users WHERE role IN ('admin', 'sysadmin') ORDER BY id;
 
+-- name: ListSysadmins :many
+SELECT * FROM users WHERE role = 'sysadmin' ORDER BY id;
+
 -- name: ListBannedUsers :many
 SELECT * FROM users WHERE banned ORDER BY updated_at DESC LIMIT 50;
 

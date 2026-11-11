@@ -161,6 +161,40 @@ func (q *Queries) ListBannedUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listSysadmins = `-- name: ListSysadmins :many
+SELECT id, tg_id, tg_username, display_name, role, accepting, banned, created_at, updated_at FROM users WHERE role = 'sysadmin' ORDER BY id
+`
+
+func (q *Queries) ListSysadmins(ctx context.Context) ([]User, error) {
+	rows, err := q.db.Query(ctx, listSysadmins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []User
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.TgID,
+			&i.TgUsername,
+			&i.DisplayName,
+			&i.Role,
+			&i.Accepting,
+			&i.Banned,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setUserAccepting = `-- name: SetUserAccepting :exec
 UPDATE users SET accepting = $2, updated_at = now() WHERE id = $1
 `
